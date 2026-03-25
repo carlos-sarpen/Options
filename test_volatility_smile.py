@@ -109,8 +109,17 @@ class TestParseSheetName:
     def test_known_formats(self, sheet, expected):
         assert _parse_sheet_name(sheet) == expected
 
-    def test_missing_type_returns_none(self):
-        assert _parse_sheet_name("BOVA 17d") is None
+    def test_missing_option_type_returns_none_in_dict(self):
+        # When only ticker + duration are in the name, option_type is None
+        result = _parse_sheet_name("BOVA 17d")
+        assert result == {"option_type": None, "underlying": "B", "duration": "17"}
+
+    def test_ticker_duration_format(self):
+        # Real-world format: BOVA-17du, SMAL-35du
+        assert _parse_sheet_name("BOVA-17du") == {"option_type": None, "underlying": "B", "duration": "17"}
+        assert _parse_sheet_name("SMAL-35du") == {"option_type": None, "underlying": "S", "duration": "35"}
+        assert _parse_sheet_name("BOVA-35du") == {"option_type": None, "underlying": "B", "duration": "35"}
+        assert _parse_sheet_name("SMAL-17du") == {"option_type": None, "underlying": "S", "duration": "17"}
 
     def test_missing_underlying_returns_none(self):
         assert _parse_sheet_name("Call 35d") is None
@@ -247,6 +256,120 @@ class TestBuildSmiles:
             "call_S_17", "put_S_17", "call_S_35", "put_S_35",
         }
         assert set(smiles.keys()) == expected_keys
+
+    # ------------------------------------------------------------------
+    # header_row support
+    # ------------------------------------------------------------------
+
+    def _make_workbook_with_title_rows(
+        self, sheets: dict[str, pd.DataFrame], title_rows: int = 2
+    ) -> BytesIO:
+        """
+        Return a workbook where each sheet has *title_rows* plain-text rows
+        before the real column-header row (which is at row index *title_rows*).
+        """
+        from openpyxl import Workbook
+
+        wb = Workbook()
+        first = True
+        for sheet_name, data_df in sheets.items():
+            ws = wb.active if first else wb.create_sheet()
+            ws.title = sheet_name
+            first = False
+            for _ in range(title_rows):
+                ws.append(["Title row"] + [None] * (len(data_df.columns) - 1))
+            ws.append(list(data_df.columns))
+            for row in data_df.itertuples(index=False):
+                ws.append(list(row))
+        buf = BytesIO()
+        wb.save(buf)
+        buf.seek(0)
+        return buf
+
+    def test_header_row_skips_title_rows(self, tmp_path):
+        buf = self._make_workbook_with_title_rows({"BOVA Call 17d": _make_sheet()})
+        path = tmp_path / "test.xlsx"
+        path.write_bytes(buf.read())
+
+        smiles = build_smiles(path, header_row=2)
+        assert "call_B_17" in smiles
+        df = smiles["call_B_17"]
+        assert list(df.columns) == ["moneyness", "implied_vol"]
+        assert df["moneyness"].notna().all()
+
+    # ------------------------------------------------------------------
+    # full_dataframe support
+    # ------------------------------------------------------------------
+
+    def test_full_dataframe_false_has_two_columns(self, tmp_path):
+        path = tmp_path / "test.xlsx"
+        path.write_bytes(_write_workbook({"BOVA Call 17d": _make_sheet()}).read())
+
+        smiles = build_smiles(path, full_dataframe=False)
+        assert list(smiles["call_B_17"].columns) == ["moneyness", "implied_vol"]
+
+    def test_full_dataframe_true_has_all_columns(self, tmp_path):
+        extra = {"Strike": [95, 100, 105, 105, 105], "Delta": [0.3, 0.5, 0.7, 0.6, 0.4]}
+        df_in = _make_sheet(n=5, extra_cols=extra)
+        path = tmp_path / "test.xlsx"
+        path.write_bytes(_write_workbook({"BOVA Call 17d": df_in}).read())
+
+        smiles = build_smiles(path, full_dataframe=True)
+        df = smiles["call_B_17"]
+        assert "moneyness" in df.columns
+        assert "implied_vol" in df.columns
+        assert "Strike" in df.columns
+        assert "Delta" in df.columns
+        assert len(df.columns) > 2
+
+    # ------------------------------------------------------------------
+    # Tipo-column splitting (ticker-duration sheet format)
+    # ------------------------------------------------------------------
+
+    def _make_ticker_du_sheet(self, ticker: str, n: int = 6) -> pd.DataFrame:
+        """Return a sheet that mixes CALLs and PUTs in a 'Tipo' column."""
+        n_each = n // 2
+        calls = _make_sheet(n=n_each)
+        calls["Tipo"] = "CALL"
+        puts = _make_sheet(n=n_each)
+        puts["Tipo"] = "PUT"
+        return pd.concat([calls, puts], ignore_index=True)
+
+    def test_tipo_column_split_produces_call_and_put_keys(self, tmp_path):
+        sheets = {
+            "BOVA-17du": self._make_ticker_du_sheet("BOVA"),
+            "SMAL-35du": self._make_ticker_du_sheet("SMAL"),
+        }
+        path = tmp_path / "test.xlsx"
+        path.write_bytes(_write_workbook(sheets).read())
+
+        smiles = build_smiles(path)
+        assert "call_B_17" in smiles
+        assert "put_B_17" in smiles
+        assert "call_S_35" in smiles
+        assert "put_S_35" in smiles
+
+    def test_tipo_column_rows_are_correctly_split(self, tmp_path):
+        df = self._make_ticker_du_sheet("BOVA", n=6)
+        path = tmp_path / "test.xlsx"
+        path.write_bytes(_write_workbook({"BOVA-17du": df}).read())
+
+        smiles = build_smiles(path)
+        # Each subset must not mix option types (CALL rows → call smile only)
+        assert len(smiles["call_B_17"]) == 3
+        assert len(smiles["put_B_17"]) == 3
+
+    def test_ticker_du_with_header_row_and_full_dataframe(self, tmp_path):
+        """All three new features work together."""
+        data = self._make_ticker_du_sheet("BOVA", n=4)
+        buf = self._make_workbook_with_title_rows({"BOVA-35du": data})
+        path = tmp_path / "test.xlsx"
+        path.write_bytes(buf.read())
+
+        smiles = build_smiles(path, header_row=2, full_dataframe=True)
+        assert "call_B_35" in smiles
+        assert "put_B_35" in smiles
+        assert len(smiles["call_B_35"].columns) > 2  # full df
 
 
 # ---------------------------------------------------------------------------
