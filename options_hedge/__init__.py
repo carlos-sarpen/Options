@@ -11,7 +11,8 @@ Public API — import everything from this package:
         compute_leg_payoff, compute_strategy_payoff, build_payoff_profile,
         generate_price_scenarios, generate_vol_scenarios, generate_time_grid,
         build_scenario_grid, apply_scenario, named_stress_scenarios,
-        apply_vol_shock, shift_smile, price_with_vol_shock, vol_shock_pnl_matrix,
+        apply_vol_shock, shift_smile, price_with_vol_shock, price_with_moneyness_shock,
+        vol_shock_pnl_matrix,
         apply_time_decay, price_over_time, compute_theta_profile,
         simulate_single_hedge, simulate_strategy, simulate_strategy_grid,
         compute_breakeven, compute_strategy_breakeven,
@@ -54,6 +55,7 @@ from .scenarios import (
 )
 from .vol_shock import (
     apply_vol_shock,
+    price_with_moneyness_shock,
     price_with_vol_shock,
     shift_smile,
     vol_shock_pnl_matrix,
@@ -109,6 +111,7 @@ __all__ = [
     "apply_vol_shock",
     "shift_smile",
     "price_with_vol_shock",
+    "price_with_moneyness_shock",
     "vol_shock_pnl_matrix",
     # theta
     "apply_time_decay",

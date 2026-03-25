@@ -71,6 +71,12 @@ def test_extrapolation_right(sample_smile):
     assert result["iv"] == pytest.approx(0.23, abs=1e-6)
 
 
+def test_hyperbolic_interpolation_returns_positive_iv(sample_smile):
+    result = interpolate_iv_from_smile(sample_smile, 1.02, method="hyperbolic")
+    assert result["iv"] > 0.0
+    assert 0.19 <= result["iv"] <= 0.24
+
+
 def test_iv_floor_is_positive(sample_smile):
     """IV must never be zero or negative."""
     for m in [0.70, 0.85, 1.00, 1.15, 1.30]:

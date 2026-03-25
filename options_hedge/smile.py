@@ -32,6 +32,29 @@ def _linear_interpolate(x: float, xs: List[float], ys: List[float]) -> float:
     return ys[-1]
 
 
+def _hyperbolic_interpolate(x: float, xs: List[float], ys: List[float]) -> float:
+    """
+    Interpolate with a simple hyperbola of the form ``a + b / x``.
+
+    Coefficients are fitted by least squares across all smile points. Falls
+    back to linear interpolation when the fit is ill-conditioned.
+    """
+    inv_xs = [1.0 / xi for xi in xs]
+    n = len(xs)
+    sum_inv_x = sum(inv_xs)
+    sum_inv_x_sq = sum(val * val for val in inv_xs)
+    sum_y = sum(ys)
+    sum_inv_x_y = sum(inv_x * y for inv_x, y in zip(inv_xs, ys))
+
+    denom = n * sum_inv_x_sq - sum_inv_x ** 2
+    if abs(denom) < 1e-12:
+        return _linear_interpolate(x, xs, ys)
+
+    b = (n * sum_inv_x_y - sum_inv_x * sum_y) / denom
+    a = (sum_y - b * sum_inv_x) / n
+    return a + b / x
+
+
 def _cubic_spline_natural(xs: List[float], ys: List[float], x: float) -> float:
     """
     Natural cubic-spline interpolation (no external dependencies).
@@ -102,7 +125,8 @@ def interpolate_iv_from_smile(
     moneyness:
         Target K/S ratio.
     method:
-        ``"cubic"`` (natural cubic spline, default) or ``"linear"``.
+        ``"cubic"`` (natural cubic spline, default), ``"linear"`` or
+        ``"hyperbolic"``.
 
     Returns
     -------
@@ -119,6 +143,8 @@ def interpolate_iv_from_smile(
 
     if method == "linear":
         iv = _linear_interpolate(moneyness, xs, ys)
+    elif method == "hyperbolic":
+        iv = _hyperbolic_interpolate(moneyness, xs, ys)
     else:
         iv = _cubic_spline_natural(xs, ys, moneyness)
 

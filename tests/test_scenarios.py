@@ -14,6 +14,7 @@ from options_hedge import (
     generate_time_grid,
     generate_vol_scenarios,
     named_stress_scenarios,
+    price_with_moneyness_shock,
     price_with_vol_shock,
     shift_smile,
     vol_shock_pnl_matrix,
@@ -161,6 +162,38 @@ def test_price_with_vol_shock_increases_price(market):
     base = price_with_vol_shock(call, market, vol_shock_abs=0.0)
     shocked = price_with_vol_shock(call, market, vol_shock_abs=0.10)
     assert shocked["price"] > base["price"]
+
+
+def test_price_with_moneyness_shock_uses_provided_premium(market):
+    call = OptionSpec(option_type="call", strike=100_000.0, expiry_days=90, quantity=2.0)
+    smile = SmileSurface(points={0.90: 0.28, 1.00: 0.25, 1.10: 0.24})
+    result = price_with_moneyness_shock(
+        call,
+        market,
+        smile,
+        moneyness_shock_pct=0.05,
+        premium_paid=4_000.0,
+    )
+
+    assert result["initial_price"] == pytest.approx(4_000.0)
+    assert result["shocked_moneyness"] == pytest.approx(1.05)
+    assert result["shocked_spot"] == pytest.approx(call.strike / 1.05)
+    assert result["absolute_gain"] == pytest.approx(
+        (result["shocked_price"] - 4_000.0) * call.quantity
+    )
+    assert result["return_pct"] == pytest.approx(result["absolute_gain"] / (4_000.0 * call.quantity))
+
+
+def test_price_with_moneyness_shock_falls_back_to_black_scholes(market):
+    call = OptionSpec(option_type="call", strike=100_000.0, expiry_days=90)
+    smile = SmileSurface(points={0.90: 0.28, 1.00: 0.25, 1.10: 0.24})
+    result = price_with_moneyness_shock(call, market, smile, moneyness_shock_pct=0.0)
+    expected_initial = price_with_vol_shock(call, market, vol_shock_abs=0.0)["price"]
+
+    assert result["initial_price"] == pytest.approx(expected_initial)
+    assert result["return_pct"] == pytest.approx(
+        (result["shocked_price"] - expected_initial) / expected_initial
+    )
 
 
 def test_vol_shock_pnl_matrix_shape(market):

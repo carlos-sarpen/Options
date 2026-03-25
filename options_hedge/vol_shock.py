@@ -113,6 +113,93 @@ def price_with_vol_shock(
     return {**result, "shocked_vol": shocked_vol, "vol_shock_abs": vol_shock_abs}
 
 
+def price_with_moneyness_shock(
+    option: OptionSpec,
+    market: MarketState,
+    smile: SmileSurface,
+    moneyness_shock_pct: float,
+    premium_paid: float | None = None,
+    *,
+    interp_method: str = "hyperbolic",
+) -> Dict[str, float | None]:
+    """
+    Re-price an option after shocking its smile moneyness.
+
+    The current smile moneyness is ``strike / spot``. A fractional shock is
+    applied to that ratio, the new smile IV is interpolated, and the option is
+    re-priced with the shocked spot implied by the new moneyness.
+
+    Parameters
+    ----------
+    option:
+        Option to reprice.
+    market:
+        Baseline market state.
+    smile:
+        SmileSurface used to interpolate the shocked IV.
+    moneyness_shock_pct:
+        Fractional moneyness shock, e.g. ``0.05`` for +5%.
+    premium_paid:
+        Original premium per unit. When omitted, the baseline Black-Scholes
+        premium is used as the invested amount.
+    interp_method:
+        Smile interpolation method. Defaults to ``"hyperbolic"``.
+
+    Returns
+    -------
+    dict with keys:
+        initial_price       — price paid initially (or BS fallback)
+        shocked_price       — repriced option premium after the shock
+        shocked_vol         — IV interpolated at the shocked moneyness
+        initial_moneyness   — baseline strike / spot
+        shocked_moneyness   — shocked strike / spot
+        shocked_spot        — spot implied by the shocked moneyness
+        absolute_gain       — (shocked_price - initial_price) * quantity
+        return_pct          — absolute_gain / invested_value, or None if zero
+        extrapolated        — whether smile lookup extrapolated
+    """
+    initial_moneyness = option.strike / market.spot
+    shocked_moneyness = initial_moneyness * (1.0 + moneyness_shock_pct)
+    if shocked_moneyness <= 0:
+        raise ValueError("moneyness_shock_pct results in non-positive moneyness")
+
+    baseline_price = (
+        premium_paid
+        if premium_paid is not None
+        else black_scholes_price(option, market)["price"]
+    )
+
+    smile_result = interpolate_iv_from_smile(
+        smile,
+        shocked_moneyness,
+        method=interp_method,
+    )
+    shocked_spot = option.strike / shocked_moneyness
+    shocked_market = MarketState(
+        spot=shocked_spot,
+        risk_free_rate=market.risk_free_rate,
+        dividend_yield=market.dividend_yield,
+        implied_vol=market.implied_vol,
+    )
+    repriced = black_scholes_price(option, shocked_market, override_vol=smile_result["iv"])
+
+    absolute_gain = (repriced["price"] - baseline_price) * option.quantity
+    invested_value = baseline_price * option.quantity
+    return_pct = (absolute_gain / invested_value) if invested_value != 0 else None
+
+    return {
+        "initial_price": baseline_price,
+        "shocked_price": repriced["price"],
+        "shocked_vol": smile_result["iv"],
+        "initial_moneyness": initial_moneyness,
+        "shocked_moneyness": shocked_moneyness,
+        "shocked_spot": shocked_spot,
+        "absolute_gain": absolute_gain,
+        "return_pct": return_pct,
+        "extrapolated": smile_result["extrapolated"],
+    }
+
+
 def vol_shock_pnl_matrix(
     option: OptionSpec,
     market: MarketState,
