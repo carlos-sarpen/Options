@@ -1,0 +1,8 @@
+# Generated sample data (run create_sample_data.py to regenerate)
+options_sample.xlsx
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
