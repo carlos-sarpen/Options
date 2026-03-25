@@ -17,6 +17,7 @@ Public API — import everything from this package:
         compute_breakeven, compute_strategy_breakeven,
         compute_convexity_metrics, build_payoff_table,
         build_strategy_payoff_table, summarise_grid_results,
+        compute_portfolio_impact,
     )
 """
 
@@ -76,6 +77,9 @@ from .analytics import (
     compute_strategy_breakeven,
     summarise_grid_results,
 )
+from .portfolio import (
+    compute_portfolio_impact,
+)
 
 __all__ = [
     # models
@@ -125,4 +129,6 @@ __all__ = [
     "build_payoff_table",
     "build_strategy_payoff_table",
     "summarise_grid_results",
+    # portfolio
+    "compute_portfolio_impact",
 ]
